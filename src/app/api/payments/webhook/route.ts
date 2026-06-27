@@ -33,12 +33,10 @@ export async function POST(request: Request) {
       const paymentId = paymentEntity?.id;
 
       if (referenceId && paymentId) {
-        // Extract the original phone/ID part (before the underscore)
+        // Extract the userIdentifier (e.g., "919876543210" from "919876543210_1719478800")
         const userIdentifier = referenceId.split('_')[0];
 
-        // Update Firestore: We use the extracted identifier to map to the correct user document
-        // If your 'payments' collection stores documents by the user's document ID, 
-        // you may need to perform a query here if the identifier is not the doc ID.
+        // Update Firestore: Targeted at the specific user document
         const paymentRef = adminDb.collection('payments').doc(userIdentifier);
         
         await paymentRef.set({
@@ -46,7 +44,7 @@ export async function POST(request: Request) {
           paymentId: paymentId,
           updatedAt: new Date().toISOString(),
           lastEvent: event.event,
-          originalReference: referenceId // Storing the full unique ID for your records
+          originalReference: referenceId // Storing the full unique ID for audit
         }, { merge: true });
 
         console.log(`Successfully processed ${event.event} for identifier: ${userIdentifier}, Payment ID: ${paymentId}`);
