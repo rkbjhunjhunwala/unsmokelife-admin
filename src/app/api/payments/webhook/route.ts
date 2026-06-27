@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const body = await request.text();
     const signature = request.headers.get('x-razorpay-signature') || '';
 
-    // Verify signature
+    // 1. Verify signature
     const isValid = validateWebhookSignature(
       body,
       signature,
@@ -22,22 +22,25 @@ export async function POST(request: Request) {
     const event = JSON.parse(body);
     console.log(`[Webhook] Processing event: ${event.event}`);
 
-    // We only care about events that confirm money movement
+    // 2. Handle events that confirm money movement
     if (event.event === 'payment_link.paid' || event.event === 'payment.captured') {
       const payload = event.payload;
       
-      // Multi-layer extraction to ensure we get the referenceId regardless of payload shape
-      const referenceId = 
+      // 3. Multi-layer extraction: reference_id OR contact (phone number)
+      const rawReference = 
         payload?.payment_link?.entity?.reference_id || 
         payload?.payment?.entity?.notes?.reference_id || 
         payload?.order?.entity?.notes?.reference_id;
 
+      // Extract identifier: split reference_id if exists, otherwise use contact
+      const userIdentifier = rawReference 
+        ? rawReference.split('_')[0] 
+        : payload?.payment?.entity?.contact;
+
       const paymentId = payload?.payment?.entity?.id;
 
-      if (referenceId) {
-        // Extract the userIdentifier (e.g., "+917842193587" from "..._1719...")
-        const userIdentifier = referenceId.split('_')[0];
-
+      if (userIdentifier) {
+        // Update Firestore
         const paymentRef = adminDb.collection('payments').doc(userIdentifier);
         
         await paymentRef.set({
@@ -45,12 +48,12 @@ export async function POST(request: Request) {
           paymentId: paymentId || 'N/A',
           updatedAt: new Date().toISOString(),
           lastEvent: event.event,
-          originalReference: referenceId
+          originalReference: rawReference || 'N/A'
         }, { merge: true });
 
         console.log(`[Success] Updated ${userIdentifier} to ${event.event}`);
       } else {
-        console.warn(`[Warning] Missing referenceId in payload for ${event.event}`, payload);
+        console.warn(`[Warning] Could not identify user for ${event.event}`, payload);
       }
     }
 
