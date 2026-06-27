@@ -21,26 +21,28 @@ export async function POST(request: Request) {
     }
 
     const event = JSON.parse(body);
+    console.log(`Received Webhook Event: ${event.event}`);
 
-    // 3. Handle the 'payment_link.paid' event
-    if (event.event === 'payment_link.paid') {
+    // 3. Handle the 'payment_link.paid' and 'payment.captured' events
+    if (event.event === 'payment_link.paid' || event.event === 'payment.captured') {
       const paymentLinkEntity = event.payload?.payment_link?.entity;
       const paymentEntity = event.payload?.payment?.entity;
       
-      const referenceId = paymentLinkEntity?.reference_id; 
+      // Attempt to find referenceId from either event source
+      const referenceId = paymentLinkEntity?.reference_id || paymentEntity?.notes?.reference_id; 
       const paymentId = paymentEntity?.id;
 
       if (referenceId && paymentId) {
-        // Update Firestore with existence check
         const paymentRef = adminDb.collection('payments').doc(referenceId);
         
         await paymentRef.set({
-          status: 'paid',
+          status: event.event === 'payment.captured' ? 'captured' : 'paid',
           paymentId: paymentId,
           updatedAt: new Date().toISOString(),
-        }, { merge: true }); // Merge prevents overwriting existing metadata
+          lastEvent: event.event
+        }, { merge: true });
 
-        console.log(`Payment successful for reference: ${referenceId}, Payment ID: ${paymentId}`);
+        console.log(`Successfully processed ${event.event} for reference: ${referenceId}, Payment ID: ${paymentId}`);
       } else {
         console.warn('Webhook received but missing referenceId or paymentId', { referenceId, paymentId });
       }
