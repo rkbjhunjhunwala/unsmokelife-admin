@@ -4,10 +4,11 @@ import { adminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(request: Request) {
   try {
+    // 1. Get body and signature
     const body = await request.text();
     const signature = request.headers.get('x-razorpay-signature') || '';
 
-    // 1. Verify signature
+    // 2. Verify signature to ensure it's from Razorpay
     const isValid = validateWebhookSignature(
       body,
       signature,
@@ -15,29 +16,39 @@ export async function POST(request: Request) {
     );
 
     if (!isValid) {
+      console.error('Webhook signature verification failed');
       return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
     const event = JSON.parse(body);
 
-    // 2. Handle the 'payment_link.paid' event
+    // 3. Handle the 'payment_link.paid' event
     if (event.event === 'payment_link.paid') {
-      const paymentDetails = event.payload.payment_link.entity;
-      const referenceId = paymentDetails.reference_id; 
-
-      // 3. Update Firestore with a check for existence
-      const paymentRef = adminDb.collection('payments').doc(referenceId);
+      const paymentLinkEntity = event.payload?.payment_link?.entity;
+      const paymentEntity = event.payload?.payment?.entity;
       
-      await paymentRef.set({
-        status: 'paid',
-        paymentId: event.payload.payment.entity.id,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true }); // Using merge: true prevents crashes if doc doesn't exist
+      const referenceId = paymentLinkEntity?.reference_id; 
+      const paymentId = paymentEntity?.id;
 
-      console.log(`Payment successful for reference: ${referenceId}`);
+      if (referenceId && paymentId) {
+        // Update Firestore with existence check
+        const paymentRef = adminDb.collection('payments').doc(referenceId);
+        
+        await paymentRef.set({
+          status: 'paid',
+          paymentId: paymentId,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true }); // Merge prevents overwriting existing metadata
+
+        console.log(`Payment successful for reference: ${referenceId}, Payment ID: ${paymentId}`);
+      } else {
+        console.warn('Webhook received but missing referenceId or paymentId', { referenceId, paymentId });
+      }
     }
 
+    // 4. Return 200 to acknowledge receipt
     return NextResponse.json({ status: 'ok' });
+    
   } catch (error) {
     console.error('Webhook error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

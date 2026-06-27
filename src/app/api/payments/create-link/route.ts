@@ -8,25 +8,40 @@ const razorpay = new Razorpay({
 
 export async function POST(request: Request) {
   try {
-    const { amount, userName, userEmail, referenceId } = await request.json();
+    const { amount, userName, userEmail, userPhone, referenceId } = await request.json();
 
+    // 1. Prepare customer object safely
+    const customer: any = {
+      name: userName || "Valued Customer",
+    };
+
+    // Only add email if it's in a valid format (contains @ and .)
+    if (userEmail && userEmail.includes('@') && userEmail.includes('.')) {
+      customer.email = userEmail;
+    }
+
+    // Add phone if provided (Ensure it is a string and potentially E.164 format)
+    if (userPhone) {
+      customer.contact = userPhone;
+    }
+
+    // 2. Create the Payment Link
     const paymentLink = await razorpay.paymentLink.create({
-      amount: amount * 100, // Amount in paise
+      amount: amount * 100,
       currency: "INR",
       accept_partial: false,
-      description: `Payment for ${userName}`,
-      customer: {
-        name: userName,
-        email: userEmail,
-      },
-      reference_id: referenceId, // Your internal ID (e.g., Firestore UID)
-      callback_url: "https://yourwebsite.com/payment-success",
+      description: `Payment for ${userName || "Service"}`,
+      customer: customer, // Uses the conditionally built object
+      reference_id: referenceId,
+      callback_url: "https://unsmokelife-admin.tomtechie.com/payment-success",
       callback_method: "get",
     });
 
     return NextResponse.json({ url: paymentLink.short_url });
-  } catch (error) {
-    console.error("Razorpay Error:", error);
-    return NextResponse.json({ error: 'Failed to create payment link' }, { status: 500 });
+  } catch (error: any) {
+    console.error("Razorpay Error:", error.error || error);
+    return NextResponse.json({ 
+      error: error.error?.description || 'Failed to create payment link' 
+    }, { status: 500 });
   }
 }
