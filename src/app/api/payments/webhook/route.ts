@@ -25,19 +25,23 @@ export async function POST(request: Request) {
     // 2. Handle events that confirm money movement
     if (event.event === 'payment_link.paid' || event.event === 'payment.captured') {
       const payload = event.payload;
+      const paymentEntity = payload?.payment?.entity;
       
-      // 3. Multi-layer extraction: reference_id OR contact (phone number)
+      // 3. Multi-layer extraction
       const rawReference = 
         payload?.payment_link?.entity?.reference_id || 
-        payload?.payment?.entity?.notes?.reference_id || 
+        paymentEntity?.notes?.reference_id || 
         payload?.order?.entity?.notes?.reference_id;
 
-      // Extract identifier: split reference_id if exists, otherwise use contact
+      // Extract identifier
       const userIdentifier = rawReference 
         ? rawReference.split('_')[0] 
-        : payload?.payment?.entity?.contact;
+        : paymentEntity?.contact;
 
-      const paymentId = payload?.payment?.entity?.id;
+      const paymentId = paymentEntity?.id;
+      
+      // Extract and convert amount (paise to INR)
+      const amount = paymentEntity?.amount ? paymentEntity.amount / 100 : 0;
 
       if (userIdentifier) {
         // Update Firestore
@@ -46,12 +50,13 @@ export async function POST(request: Request) {
         await paymentRef.set({
           status: event.event === 'payment.captured' ? 'captured' : 'paid',
           paymentId: paymentId || 'N/A',
+          amount: amount, 
           updatedAt: new Date().toISOString(),
           lastEvent: event.event,
           originalReference: rawReference || 'N/A'
         }, { merge: true });
 
-        console.log(`[Success] Updated ${userIdentifier} to ${event.event}`);
+        console.log(`[Success] Updated ${userIdentifier} to ${event.event} with amount: ${amount}`);
       } else {
         console.warn(`[Warning] Could not identify user for ${event.event}`, payload);
       }

@@ -1,18 +1,36 @@
 'use client';
 import { useState, useEffect } from 'react';
+// Added Firebase imports for the real-time payment history table
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from '@/lib/firebase'; // Ensure this points to your firebase config file
 
 export default function PaymentsPage() {
+  // ==========================================
+  // STATE MANAGEMENT: USERS & RAZORPAY LINKS
+  // ==========================================
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [paymentUrl, setPaymentUrl] = useState('');
 
-  // Cash Payment States
+  // ==========================================
+  // STATE MANAGEMENT: CASH PAYMENTS
+  // ==========================================
   const [showCashForm, setShowCashForm] = useState(false);
   const [cashData, setCashData] = useState({ amount: '', remarks: '' });
   const [recordingCash, setRecordingCash] = useState(false);
 
+  // ==========================================
+  // STATE MANAGEMENT: PAYMENT HISTORY TABLE
+  // ==========================================
+  const [payments, setPayments] = useState<any[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5; // Adjust this number to show more/less rows per page
+
+  // ==========================================
+  // EFFECT: RESET UI ON USER CHANGE
+  // ==========================================
   // Reset UI states when user changes to prevent stale data
   useEffect(() => {
     setPaymentUrl('');
@@ -20,7 +38,11 @@ export default function PaymentsPage() {
     setCashData({ amount: '', remarks: '' });
   }, [selectedUser]);
 
+  // ==========================================
+  // EFFECT: FETCH USERS & PAYMENT HISTORY
+  // ==========================================
   useEffect(() => {
+    // 1. Fetch users list for the dropdown
     const fetchUsers = async () => {
       try {
         const res = await fetch('/api/admin/get-users');
@@ -31,8 +53,32 @@ export default function PaymentsPage() {
       }
     };
     fetchUsers();
+
+    // 2. Set up real-time listener for the Firestore payments collection
+    const q = query(collection(db, 'payments'), orderBy('updatedAt', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const paymentsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPayments(paymentsData);
+    });
+
+    // Cleanup the listener when the component unmounts
+    return () => unsub();
   }, []);
 
+  // ==========================================
+  // CALCULATIONS: PAGINATION LOGIC
+  // ==========================================
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = payments.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(payments.length / itemsPerPage);
+
+  // ==========================================
+  // HANDLER: GENERATE RAZORPAY LINK
+  // ==========================================
   const generatePaymentLink = async () => {
     if (!selectedUser || !amount || parseFloat(amount) <= 0) {
       return alert("Please select a user and enter a valid amount");
@@ -70,6 +116,9 @@ export default function PaymentsPage() {
     }
   };
 
+  // ==========================================
+  // HANDLER: RECORD MANUAL CASH PAYMENT
+  // ==========================================
   const recordCashPayment = async () => {
     if (!selectedUser || !cashData.amount || parseFloat(cashData.amount) <= 0) {
       return alert("Please select a user and enter a valid cash amount");
@@ -102,11 +151,16 @@ export default function PaymentsPage() {
     }
   };
 
+  // ==========================================
+  // RENDER UI
+  // ==========================================
   return (
     <div className="p-6 space-y-8">
       <h1 className="text-2xl font-bold">Payments & Subscriptions</h1>
       
-      {/* User Selection */}
+      {/* ----------------------------- */}
+      {/* User Selection Block          */}
+      {/* ----------------------------- */}
       <div className="bg-white p-6 rounded shadow border max-w-xl space-y-4">
         <label className="block text-sm font-medium text-slate-700">Select User</label>
         <select 
@@ -130,7 +184,9 @@ export default function PaymentsPage() {
         )}
       </div>
 
-      {/* Razorpay Section */}
+      {/* ----------------------------- */}
+      {/* Razorpay Link Generator Block */}
+      {/* ----------------------------- */}
       <div className="bg-white p-6 rounded shadow border max-w-xl space-y-4">
         <h2 className="font-semibold">Razorpay Link</h2>
         <input 
@@ -163,7 +219,9 @@ export default function PaymentsPage() {
         )}
       </div>
 
-      {/* Cash Payment Section */}
+      {/* ----------------------------- */}
+      {/* Manual Cash Payment Block     */}
+      {/* ----------------------------- */}
       <div className="bg-white p-6 rounded shadow border max-w-xl space-y-4">
         <h2 className="font-semibold">Record Manual Cash Payment</h2>
         <button 
@@ -199,6 +257,82 @@ export default function PaymentsPage() {
           </div>
         )}
       </div>
+
+      {/* ----------------------------- */}
+      {/* Paginated Payment History     */}
+      {/* ----------------------------- */}
+      <div className="bg-white p-6 rounded shadow border max-w-4xl space-y-4">
+        <h2 className="font-semibold">Payment History</h2>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="border-b bg-slate-50">
+              <tr>
+                <th className="p-3 font-medium text-slate-600">User / Phone</th>
+                <th className="p-3 font-medium text-slate-600">Amount</th>
+                <th className="p-3 font-medium text-slate-600">Status</th>
+                <th className="p-3 font-medium text-slate-600">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentItems.length > 0 ? (
+                currentItems.map((p) => (
+                  <tr key={p.id} className="border-b hover:bg-slate-50 transition-colors">
+                    <td className="p-3 truncate max-w-[150px] font-mono text-xs">{p.id}</td>
+                    <td className="p-3 font-medium text-slate-800">
+                      ₹{p.amount ? Number(p.amount).toFixed(2) : '0.00'}
+                    </td>
+                    <td className="p-3">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        p.status === 'captured' 
+                          ? 'bg-emerald-100 text-emerald-800' 
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {p.status || 'unknown'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-slate-500">
+                      {p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : 'N/A'}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="p-6 text-center text-slate-500">
+                    No payment records found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination Controls */}
+        {payments.length > itemsPerPage && (
+          <div className="flex items-center justify-between pt-4 border-t">
+            <span className="text-sm text-slate-600">
+              Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, payments.length)} of {payments.length} entries
+            </span>
+            <div className="flex gap-2">
+              <button 
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => prev - 1)}
+                className="px-3 py-1 border rounded text-sm hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                Previous
+              </button>
+              <button 
+                disabled={currentPage === totalPages || totalPages === 0}
+                onClick={() => setCurrentPage(prev => prev + 1)}
+                className="px-3 py-1 border rounded text-sm hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      
     </div>
   );
 }
