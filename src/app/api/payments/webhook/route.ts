@@ -4,11 +4,10 @@ import { adminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(request: Request) {
   try {
-    // 1. Get body and signature
     const body = await request.text();
     const signature = request.headers.get('x-razorpay-signature') || '';
 
-    // 2. Verify signature to ensure it's from Razorpay
+    // Verify signature
     const isValid = validateWebhookSignature(
       body,
       signature,
@@ -21,39 +20,40 @@ export async function POST(request: Request) {
     }
 
     const event = JSON.parse(body);
-    console.log(`Received Webhook Event: ${event.event}`);
+    console.log(`[Webhook] Processing event: ${event.event}`);
 
-    // 3. Handle the 'payment_link.paid' and 'payment.captured' events
+    // We only care about events that confirm money movement
     if (event.event === 'payment_link.paid' || event.event === 'payment.captured') {
-      const paymentLinkEntity = event.payload?.payment_link?.entity;
-      const paymentEntity = event.payload?.payment?.entity;
+      const payload = event.payload;
       
-      // Get the unique referenceId sent from the frontend (e.g., "919876543210_1719478800")
-      const referenceId = paymentLinkEntity?.reference_id || paymentEntity?.notes?.reference_id; 
-      const paymentId = paymentEntity?.id;
+      // Multi-layer extraction to ensure we get the referenceId regardless of payload shape
+      const referenceId = 
+        payload?.payment_link?.entity?.reference_id || 
+        payload?.payment?.entity?.notes?.reference_id || 
+        payload?.order?.entity?.notes?.reference_id;
 
-      if (referenceId && paymentId) {
-        // Extract the userIdentifier (e.g., "919876543210" from "919876543210_1719478800")
+      const paymentId = payload?.payment?.entity?.id;
+
+      if (referenceId) {
+        // Extract the userIdentifier (e.g., "+917842193587" from "..._1719...")
         const userIdentifier = referenceId.split('_')[0];
 
-        // Update Firestore: Targeted at the specific user document
         const paymentRef = adminDb.collection('payments').doc(userIdentifier);
         
         await paymentRef.set({
           status: event.event === 'payment.captured' ? 'captured' : 'paid',
-          paymentId: paymentId,
+          paymentId: paymentId || 'N/A',
           updatedAt: new Date().toISOString(),
           lastEvent: event.event,
-          originalReference: referenceId // Storing the full unique ID for audit
+          originalReference: referenceId
         }, { merge: true });
 
-        console.log(`Successfully processed ${event.event} for identifier: ${userIdentifier}, Payment ID: ${paymentId}`);
+        console.log(`[Success] Updated ${userIdentifier} to ${event.event}`);
       } else {
-        console.warn('Webhook received but missing referenceId or paymentId', { referenceId, paymentId });
+        console.warn(`[Warning] Missing referenceId in payload for ${event.event}`, payload);
       }
     }
 
-    // 4. Return 200 to acknowledge receipt
     return NextResponse.json({ status: 'ok' });
     
   } catch (error) {
