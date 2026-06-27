@@ -28,21 +28,28 @@ export async function POST(request: Request) {
       const paymentLinkEntity = event.payload?.payment_link?.entity;
       const paymentEntity = event.payload?.payment?.entity;
       
-      // Attempt to find referenceId from either event source
+      // Get the unique referenceId sent from the frontend (e.g., "919876543210_1719478800")
       const referenceId = paymentLinkEntity?.reference_id || paymentEntity?.notes?.reference_id; 
       const paymentId = paymentEntity?.id;
 
       if (referenceId && paymentId) {
-        const paymentRef = adminDb.collection('payments').doc(referenceId);
+        // Extract the original phone/ID part (before the underscore)
+        const userIdentifier = referenceId.split('_')[0];
+
+        // Update Firestore: We use the extracted identifier to map to the correct user document
+        // If your 'payments' collection stores documents by the user's document ID, 
+        // you may need to perform a query here if the identifier is not the doc ID.
+        const paymentRef = adminDb.collection('payments').doc(userIdentifier);
         
         await paymentRef.set({
           status: event.event === 'payment.captured' ? 'captured' : 'paid',
           paymentId: paymentId,
           updatedAt: new Date().toISOString(),
-          lastEvent: event.event
+          lastEvent: event.event,
+          originalReference: referenceId // Storing the full unique ID for your records
         }, { merge: true });
 
-        console.log(`Successfully processed ${event.event} for reference: ${referenceId}, Payment ID: ${paymentId}`);
+        console.log(`Successfully processed ${event.event} for identifier: ${userIdentifier}, Payment ID: ${paymentId}`);
       } else {
         console.warn('Webhook received but missing referenceId or paymentId', { referenceId, paymentId });
       }

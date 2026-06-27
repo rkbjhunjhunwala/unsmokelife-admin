@@ -41,6 +41,9 @@ export default function PaymentsPage() {
     setLoading(true);
     setPaymentUrl('');
     
+    // Create a unique ID using Phone + Timestamp to prevent "already exists" errors
+    const uniqueReferenceId = `${selectedUser.mobile || 'no-phone'}_${Date.now()}`;
+    
     try {
       const res = await fetch('/api/payments/create-link', {
         method: 'POST',
@@ -50,7 +53,7 @@ export default function PaymentsPage() {
           userName: selectedUser.name,
           userEmail: selectedUser.email,
           userMobile: selectedUser.mobile,
-          referenceId: selectedUser.id
+          referenceId: uniqueReferenceId 
         }),
       });
       
