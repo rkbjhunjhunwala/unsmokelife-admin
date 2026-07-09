@@ -2,6 +2,7 @@ import { adminDb } from '@/lib/firebaseAdmin';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import AdminActionButtons from './AdminActionButtons';
+import CompletedChaptersList from './CompletedChaptersList';
 import { cookies } from 'next/headers';
 
 interface UserProfilePageProps {
@@ -12,11 +13,9 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
   const resolvedParams = await params;
   const userId = resolvedParams.id;
 
-  // 1. IDENTIFY THE CURRENT ADMIN
   const cookieStore = await cookies();
   const adminUid = cookieStore.get('admin_uid')?.value;
 
-  // 2. FETCH ADMIN ROLE
   let adminRole = 'none';
   if (adminUid) {
     const adminDoc = await adminDb.collection('admins').doc(adminUid).get();
@@ -25,33 +24,48 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
     }
   }
 
-  // 3. FETCH TARGET USER & SUB-COLLECTIONS
   const userDocRef = adminDb.collection('users').doc(userId);
   const userDoc = await userDocRef.get();
   
   const accessDoc = await userDocRef.collection('settings').doc('access').get();
   const progressDoc = await userDocRef.collection('progress').doc('status').get();
   
-  // Fetch the list of completed chapters
+  // 2. FETCH AND SANITIZE THE ACTUAL DATA
   const completedChaptersSnap = await userDocRef.collection('completedChapters').get();
-  const completedChaptersList = completedChaptersSnap.docs.map(doc => doc.id);
+  
+  const completedChaptersData = completedChaptersSnap.docs.map(doc => {
+    const data = doc.data();
+    const sanitizedData: Record<string, any> = {};
+    
+    // Convert Firestore Timestamp class instances to plain strings
+    Object.keys(data).forEach(key => {
+      const value = data[key];
+      if (value && typeof value.toDate === 'function') {
+        sanitizedData[key] = value.toDate().toISOString();
+      } else if (Array.isArray(value)) {
+        sanitizedData[key] = JSON.parse(JSON.stringify(value));
+      } else {
+        sanitizedData[key] = value;
+      }
+    });
+
+    return {
+      id: doc.id,
+      ...sanitizedData
+    };
+  });
 
   if (!userDoc.exists) {
     notFound();
   }
 
   const user = userDoc.data();
-  // Changed: Use null if document doesn't exist so we can show "Not Set"
   const accessData = accessDoc.exists ? accessDoc.data() : { unlockedDay: null };
   const progressData = progressDoc.exists ? progressDoc.data() : { lastCompletedPath: null };
 
   const formatProgressPath = (path: string | null) => {
     if (!path) return 'No progress yet';
-    return path
-      .split('/')
-      .filter((_, index) => index % 2 !== 0)
-      .map(s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
-      .join(', ');
+    return path.split('/').filter((_, index) => index % 2 !== 0).map(s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())).join(', ');
   };
 
   const name = user?.name || 'Anonymous User';
@@ -61,12 +75,9 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
   const cigsPerDay = user?.cigsPerDay || 0;
   const costPerCig = user?.costPerCig || 0;
   const yearsSmoking = user?.yearsSmoking || 0;
-  const modulesCompleted = Array.isArray(user?.completedModules) ? user?.completedModules.length : 0;
 
   const joinedDate = user?.createdAt && typeof user?.createdAt.toDate === 'function'
-    ? new Date(user.createdAt.toDate()).toLocaleDateString('en-US', {
-        month: 'long', day: 'numeric', year: 'numeric'
-      })
+    ? new Date(user.createdAt.toDate()).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : 'Unknown Date';
 
   const annualCost = cigsPerDay * costPerCig * 365;
@@ -74,9 +85,7 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div className="flex items-center gap-4">
-        <Link href="/dashboard/users" className="text-slate-500 hover:text-indigo-600 transition-colors">
-          ← Back to Users
-        </Link>
+        <Link href="/dashboard/users" className="text-slate-500 hover:text-indigo-600 transition-colors">← Back to Users</Link>
       </div>
 
       <div className="flex items-center justify-between">
@@ -85,7 +94,7 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
           <AdminActionButtons 
             userId={userId} 
             currentStatus={user?.status || 'active'} 
-            initialName={name} // Pass the name variable here 
+            initialName={name} 
             initialCigs={cigsPerDay}
             initialUnlockedDay={accessData?.unlockedDay}
             adminRole={adminRole} 
@@ -109,16 +118,11 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 shadow-sm">
               <div className="text-xs font-semibold text-amber-600 uppercase">Unlocked Day</div>
-              {/* Changed: Displays "Not Set" if unlockedDay is null/undefined */}
-              <div className="text-2xl font-bold text-amber-900 mt-1">
-                {accessData?.unlockedDay ? `Day ${accessData.unlockedDay}` : 'Not Set'}
-              </div>
+              <div className="text-2xl font-bold text-amber-900 mt-1">{accessData?.unlockedDay ? `Day ${accessData.unlockedDay}` : 'Not Set'}</div>
             </div>
             <div className="bg-sky-50 p-4 rounded-xl border border-sky-100 shadow-sm">
               <div className="text-xs font-semibold text-sky-600 uppercase">Last Completed</div>
-              <div className="text-sm font-bold text-sky-900 mt-2 truncate">
-                {formatProgressPath(progressData?.lastCompletedPath || null)}
-              </div>
+              <div className="text-sm font-bold text-sky-900 mt-2 truncate">{formatProgressPath(progressData?.lastCompletedPath || null)}</div>
             </div>
           </div>
 
@@ -134,18 +138,7 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <h3 className="text-lg font-bold text-slate-900 mb-4">Completed Chapters</h3>
-            {completedChaptersList.length > 0 ? (
-              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {completedChaptersList.map((chapterId) => (
-                  <li key={chapterId} className="flex items-center text-sm text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">
-                    <span className="mr-2 text-green-500">✓</span>
-                    {chapterId.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-slate-500 italic">No chapters completed yet.</p>
-            )}
+            <CompletedChaptersList chapters={completedChaptersData} />
           </div>
         </div>
       </div>

@@ -7,7 +7,7 @@ import {
   canManageAdmins,
   canViewLogs,
   canAccessPayments,
-  canViewUserList // Added this import
+  canViewUserList
 } from '@/lib/permissions';
 
 export default function Sidebar() {
@@ -24,6 +24,8 @@ export default function Sidebar() {
     { name: 'Users', href: '/dashboard/users', show: canViewUserList(userRole) },
     { name: 'Manage Roles', href: '/dashboard/manage-roles', show: canManageAdmins(userRole) },
     { name: 'Payments', href: '/dashboard/payments', show: canAccessPayments(userRole) },
+    // Community Chat navigation point added safely into the active array tracking
+    { name: 'Community Chat', href: '/dashboard/communitychat', show: true },
     { name: 'Logs', href: '/dashboard/logs', show: canViewLogs(userRole) },
   ];
 
