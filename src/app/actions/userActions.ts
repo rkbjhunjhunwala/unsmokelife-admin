@@ -105,3 +105,63 @@ export async function updateUserProfile(userId: string, formData: FormData, admi
     return { success: false, error: 'Failed to update user profile.' };
   }
 }
+
+/**
+ * Updates a homework response's userChoice ('yes' to 'no' only, never 'no' to 'yes').
+ */
+export async function updateHomeworkChoice(
+  userId: string, 
+  homeworkDocId: string, 
+  newUserChoice: string, 
+  adminRole: string
+) {
+  try {
+    // 1. SECURITY GUARD: Check permissions (Super Admin, Admin, and Customer Support can edit data)
+    if (!canEditData(adminRole)) {
+      return { success: false, error: 'Unauthorized: You do not have permission to edit homework responses.' };
+    }
+
+    // 2. Point to the homework_responses collection path
+    const homeworkRef = adminDb
+      .collection('users')
+      .doc(userId)
+      .collection('homework_responses')
+      .doc(homeworkDocId);
+
+    const docSnap = await homeworkRef.get();
+
+    if (!docSnap.exists) {
+      return { success: false, error: 'Homework response record not found.' };
+    }
+
+    const currentData = docSnap.data();
+    const currentChoice = currentData?.userChoice ? String(currentData.userChoice).toLowerCase().trim() : '';
+    const normalizedNewChoice = String(newUserChoice).toLowerCase().trim();
+
+    // 3. ENFORCE THE "YES -> NO" RESTRICTION RULE
+    // If current choice is explicitly 'no', block any attempt to change it to 'yes'
+    if (currentChoice === 'no' && normalizedNewChoice === 'yes') {
+      return { 
+        success: false, 
+        error: 'Policy Restriction: You can change an answer from Yes to No, but you cannot change a No to a Yes.' 
+      };
+    }
+
+    // 4. Perform the update
+    await homeworkRef.update({
+      userChoice: normalizedNewChoice,
+      updatedAt: new Date().toISOString()
+    });
+
+    // 5. Log the action
+    await logAdminAction('admin-dashboard', `Updated homework ${homeworkDocId} userChoice to ${normalizedNewChoice}`, userId);
+
+    // 6. Refresh the profile page cache
+    revalidatePath(`/dashboard/users/${userId}`);
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating homework choice:', error);
+    return { success: false, error: 'Failed to update homework choice.' };
+  }
+}
